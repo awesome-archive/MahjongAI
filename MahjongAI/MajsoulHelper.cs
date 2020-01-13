@@ -118,28 +118,58 @@ namespace MahjongAI
                         MethodName = (string)obj["methodName"],
                         Json = obj["data"],
                     };
+                    Trace.TraceInformation("Recv: {0}", JsonConvert.SerializeObject(res));
+                }
+                else if (!obj.ContainsKey("error"))
+                {
+                    res = new MajsoulMessage
+                    {
+                        Success = false,
+                        Type = (MajsoulMessageType)Enum.Parse(typeof(MajsoulMessageType), (string)obj["type"], true),
+                        MethodName = (string)obj["methodName"],
+                        Data = rawData,
+                    };
+                    Trace.TraceInformation("Recv: {0}", JsonConvert.SerializeObject(res));
                 }
                 else
                 {
                     res = new MajsoulMessage
                     {
                         Success = false,
-                        MethodName = (string)obj["methodName"],
                         Data = rawData,
                     };
+                    Trace.TraceInformation("Error parsing server message: Node: {0} (data = {1})", (string)obj["error"], rawData);
                 }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
                 res = new MajsoulMessage
                 {
                     Success = false,
                     Data = rawData,
                 };
+                Trace.TraceInformation("Error parsing server message: {0} (data = {1})", ex.Message, rawData);
             }
 
-            Trace.TraceInformation("Recv: {0}", JsonConvert.SerializeObject(res));
             return res;
+        }
+
+        public void selfCheck()
+        {
+            lock (process)
+            {
+                send(JsonConvert.SerializeObject(new
+                {
+                    action = "encode",
+                    methodName = ".lq.Lobby.heatbeat",
+                    data = new { },
+                }));
+                var testOutput = recv();
+                if (testOutput == null)
+                {
+                    throw new Exception(process.StandardError.ReadToEnd());
+                }
+            }
         }
 
         private void send(string str)

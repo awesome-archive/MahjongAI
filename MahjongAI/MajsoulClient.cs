@@ -18,8 +18,8 @@ namespace MahjongAI
 {
     class MajsoulClient : PlatformClient
     {
-        private const string serverListUrl = "https://lb-hk.majsoul.com:2901/api/v0/recommend_list?service=ws-gateway&protocol=ws&ssl=true";
-        private const string gameServerListUrl = "https://lb-hk.majsoul.com:2901/api/v0/recommend_list?service=ws-game-gateway&protocol=ws&ssl=true";
+        private const string serverListUrl = "/recommend_list?service=ws-gateway&protocol=ws&ssl=true";
+        private const string gameServerListUrlTemplate = "/recommend_list?service=ws-game-gateway&protocol=ws&ssl=true&location={0}";
         private const string replaysFileName = "replays.txt";
 
         private WebSocket ws;
@@ -40,6 +40,9 @@ namespace MahjongAI
         private bool inPrivateRoom = false;
         private bool continuedBetweenGames = false;
         private bool gameStarted = false;
+        private Stopwatch stopwatch = new Stopwatch();
+        private Random random = new Random();
+        private Dictionary<string, Timer> timers = new Dictionary<string, Timer>();
 
         public MajsoulClient(Config config) : base(config)
         {
@@ -86,6 +89,8 @@ namespace MahjongAI
             }).Wait();
             new Task(HeartBeat).Start();
             connected = true;
+
+            expectMessage(".lq.Lobby.login", timeout: 5000, timeoutMessage: "Login timed out.");
         }
 
         public override void Join(GameType type)
@@ -99,20 +104,26 @@ namespace MahjongAI
                     typeNum += 1;
                 }
 
-                if (type.HasFlag(GameType.Level_Phoenix))
+                if (type.HasFlag(GameType.Level_Throne))
+                {
+                    typeNum += 12;
+                }
+                else if (type.HasFlag(GameType.Level_Jade))
                 {
                     typeNum += 9;
                 }
-                else if (type.HasFlag(GameType.Level_VeryHigh))
+                else if (type.HasFlag(GameType.Level_Gold))
                 {
                     typeNum += 6;
                 }
-                else if (type.HasFlag(GameType.Level_High))
+                else if (type.HasFlag(GameType.Level_Silver))
                 {
                     typeNum += 3;
                 }
 
                 Send(ws, ".lq.Lobby.matchGame", new { match_mode = typeNum }).Wait();
+
+                expectMessage(".lq.FastTest.authGame", timeout: 60000, timeoutMessage: "Game matching timed out.");
             }
             else
             {
@@ -146,47 +157,54 @@ namespace MahjongAI
 
         public override void Pass()
         {
-            Send(wsGame, ".lq.FastTest.inputChiPengGang", new { cancel_operation = true, timeuse = 2 }).Wait();
+            doRandomDelay();
+            Send(wsGame, ".lq.FastTest.inputChiPengGang", new { cancel_operation = true, timeuse = stopwatch.Elapsed.Seconds }).Wait();
         }
 
         public override void Discard(Tile tile)
         {
-            Send(wsGame, ".lq.FastTest.inputOperation", new { type = nextReach ? 7 : 1, tile = tile.OfficialName, moqie = gameData.lastTile == tile, timeuse = 2 }).Wait();
+            doRandomDelay();
+            Send(wsGame, ".lq.FastTest.inputOperation", new { type = nextReach ? 7 : 1, tile = tile.OfficialName, moqie = gameData.lastTile == tile, timeuse = stopwatch.Elapsed.Seconds }).Wait();
             nextReach = false;
             lastDiscardedTile = tile;
         }
 
         public override void Pon(Tile tile0, Tile tile1)
         {
+            doRandomDelay();
             var combination = operationList.First(item => (int)item["type"] == 3)["combination"].Select(t => (string)t);
             int index = combination.ToList().FindIndex(comb => comb.Contains(tile0.GeneralName));
-            Send(wsGame, ".lq.FastTest.inputChiPengGang", new { type = 3, index }).Wait();
+            Send(wsGame, ".lq.FastTest.inputChiPengGang", new { type = 3, index, timeuse = stopwatch.Elapsed.Seconds }).Wait();
         }
 
         public override void Minkan()
         {
-            Send(wsGame, ".lq.FastTest.inputChiPengGang", new { type = 5, index = 0 }).Wait();
+            doRandomDelay();
+            Send(wsGame, ".lq.FastTest.inputChiPengGang", new { type = 5, index = 0, timeuse = stopwatch.Elapsed.Seconds }).Wait();
         }
 
         public override void Chii(Tile tile0, Tile tile1)
         {
+            doRandomDelay();
             var combination = operationList.First(item => (int)item["type"] == 2)["combination"].Select(t => (string)t);
             int index = combination.ToList().FindIndex(comb => comb.Split('|').OrderBy(t => t).SequenceEqual(new[] { tile0.OfficialName, tile1.OfficialName }.OrderBy(t => t)));
-            Send(wsGame, ".lq.FastTest.inputChiPengGang", new { type = 2, index }).Wait();
+            Send(wsGame, ".lq.FastTest.inputChiPengGang", new { type = 2, index, timeuse = stopwatch.Elapsed.Seconds }).Wait();
         }
 
         public override void Ankan(Tile tile)
         {
+            doRandomDelay();
             var combination = operationList.First(item => (int)item["type"] == 4)["combination"].Select(t => (string)t);
             int index = combination.ToList().FindIndex(comb => comb.Contains(tile.GeneralName));
-            Send(wsGame, ".lq.FastTest.inputChiPengGang", new { type = 4, index }).Wait();
+            Send(wsGame, ".lq.FastTest.inputChiPengGang", new { type = 4, index, timeuse = stopwatch.Elapsed.Seconds }).Wait();
         }
 
         public override void Kakan(Tile tile)
         {
+            doRandomDelay();
             var combination = operationList.First(item => (int)item["type"] == 6)["combination"].Select(t => (string)t);
             int index = combination.ToList().FindIndex(comb => comb.Contains(tile.GeneralName) || comb.Contains(tile.OfficialName));
-            Send(wsGame, ".lq.FastTest.inputChiPengGang", new { type = 6, index }).Wait();
+            Send(wsGame, ".lq.FastTest.inputChiPengGang", new { type = 6, index, timeuse = stopwatch.Elapsed.Seconds }).Wait();
         }
 
         public override void Ron()
@@ -201,7 +219,8 @@ namespace MahjongAI
 
         public override void Ryuukyoku()
         {
-            Send(wsGame, ".lq.FastTest.inputChiPengGang", new { type = 10, index = 0 }).Wait();
+            doRandomDelay();
+            Send(wsGame, ".lq.FastTest.inputChiPengGang", new { type = 10, index = 0, timeuse = stopwatch.Elapsed.Seconds }).Wait();
         }
 
         public override void Nuku()
@@ -236,10 +255,11 @@ namespace MahjongAI
                 InvokeOnUnknownEvent("Game found. Connecting...");
                 while (!gameStarted)
                 {
-                    wsGame = new WebSocket("wss://" + getServerHost(gameServerListUrl), onMessage: OnMessage, onError: OnError);
+                    wsGame = new WebSocket("wss://" + getServerHost(string.Format(gameServerListUrlTemplate, data["location"])), onMessage: OnMessage, onError: OnError);
                     wsGame.Connect().Wait();
                     Send(wsGame, ".lq.FastTest.authGame", new
                     {
+                        account_id = accountId,
                         token = data["connect_token"],
                         game_uuid = data["game_uuid"]
                     }).Wait();
@@ -265,6 +285,11 @@ namespace MahjongAI
             {
                 pendingActions.Enqueue(message);
                 return;
+            }
+
+            if (message.MethodName != null && timers.ContainsKey(message.MethodName))
+            {
+                timers[message.MethodName].Dispose();
             }
 
             if (!message.Success && message.MethodName != ".lq.FastTest.authGame")
@@ -387,6 +412,7 @@ namespace MahjongAI
                     if (!syncing)
                     {
                         Thread.Sleep(2000); // 等待发牌动画结束
+                        stopwatch.Restart();
                         InvokeOnDraw(player.hand.Last());
                     }
                 }
@@ -458,7 +484,11 @@ namespace MahjongAI
                     player.hand.Add(tile);
                     gameData.lastTile = tile;
                     operationList = message.Json["operation"]["operation_list"];
-                    if (!syncing) InvokeOnDraw(tile);
+                    if (!syncing)
+                    {
+                        stopwatch.Restart();
+                        InvokeOnDraw(tile);
+                    }
                 }
             }
             else if (message.MethodName == "ActionDiscardTile")
@@ -504,7 +534,11 @@ namespace MahjongAI
                 if (keyValuePairs["operation"] != null)
                 {
                     operationList = message.Json["operation"]["operation_list"];
-                    if (!syncing) InvokeOnWait(tile, currentPlayer);
+                    if (!syncing)
+                    {
+                        stopwatch.Restart();
+                        InvokeOnWait(tile, currentPlayer);
+                    }
                 }
             }
             else if (message.MethodName == "ActionChiPengGang")
@@ -761,9 +795,25 @@ namespace MahjongAI
         private string getServerHost(string serverListUrl)
         {
             var webClient = new WebClient();
-            var serverListJson = webClient.DownloadString(serverListUrl);
+            var serverListJson = webClient.DownloadString(Constants.MAJSOUL_API_URL_PRIFIX[config.MajsoulRegion] + serverListUrl);
             var serverList = JObject.Parse(serverListJson)["servers"];
             return (string)serverList[0];
+        }
+
+        private void doRandomDelay()
+        {
+            if (stopwatch.Elapsed < TimeSpan.FromSeconds(2))
+            {
+                Thread.Sleep(random.Next(1, 4) * 1000);
+            }
+        }
+
+        private void expectMessage(string methodName, int timeout, string timeoutMessage)
+        {
+            timers[methodName] = new Timer((state) => {
+                InvokeOnUnknownEvent(timeoutMessage);
+                Close(true);
+            }, state: null, dueTime: timeout, period: Timeout.Infinite);
         }
     }
 }
